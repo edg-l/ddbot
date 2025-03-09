@@ -12,7 +12,10 @@ use octocrab::{
     Octocrab, issues,
     models::{
         self, UserId,
-        webhook_events::{WebhookEvent, WebhookEventType, payload::IssuesWebhookEventAction},
+        webhook_events::{
+            WebhookEvent, WebhookEventType,
+            payload::{IssuesWebhookEventAction, PullRequestWebhookEventAction},
+        },
     },
     params,
 };
@@ -93,7 +96,54 @@ async fn webhook_handler(State(state): State<AppState>, req: Request) -> Respons
     // Now you can match on event type and call any specific handling logic
     match event.kind {
         WebhookEventType::Ping => info!("Received a ping"),
-        WebhookEventType::PullRequest => info!("Received a pull request event"),
+        WebhookEventType::PullRequest => {
+            info!("Received a pull request event");
+            if let models::webhook_events::WebhookEventPayload::PullRequest(payload) =
+                event.specific
+            {
+                let repo = event.repository.unwrap();
+                match payload.action {
+                    PullRequestWebhookEventAction::Edited => todo!(),
+                    PullRequestWebhookEventAction::Opened
+                    | PullRequestWebhookEventAction::Reopened => {
+                        let pulls = client.pulls(repo.owner.unwrap().login, repo.name);
+                        let issues = client.issues_by_id(repo.id);
+                        let files = pulls.list_files(payload.pull_request.number).await.unwrap();
+
+                        let mut add_labels: Vec<String> = Vec::new();
+
+                        for file in files {
+                            if file.filename.contains("client") {
+                                add_labels.push("client".to_string());
+                            }
+                            if file.filename.contains("server") {
+                                add_labels.push("server".to_string());
+                            }
+                            if file.filename.contains("demo") {
+                                add_labels.push("demo".to_string());
+                            }
+                            if file.filename.contains("editor") {
+                                add_labels.push("editor".to_string());
+                            }
+                            if file.filename.contains("engine") {
+                                add_labels.push("engine".to_string());
+                            }
+                            if file.filename.contains("map") {
+                                add_labels.push("maps".to_string());
+                            }
+                            if file.filename.contains("network") {
+                                add_labels.push("network".to_string());
+                            }
+                        }
+                        issues
+                            .add_labels(payload.number, &add_labels)
+                            .await
+                            .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+        }
         WebhookEventType::Issues => {
             if let models::webhook_events::WebhookEventPayload::Issues(payload) = event.specific {
                 match payload.action {
