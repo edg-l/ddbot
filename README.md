@@ -1,4 +1,12 @@
+# ddbot
 
+A DDNet github issue/pr bot.
+
+env vars:
+```
+GITHUB_APP_ID=gh app id
+APP_PRIVATE_KEY_PATH=./gh app private key.pem
+```
 
 local test:
 
