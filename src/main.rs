@@ -2,22 +2,21 @@ use std::{collections::HashSet, error::Error, sync::Arc};
 
 use axum::{
     Router,
-    body::{Body, Bytes, to_bytes},
+    body::to_bytes,
     extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::post,
 };
 use octocrab::{
-    Octocrab, issues,
+    Octocrab,
     models::{
-        self, UserId,
+        self,
         webhook_events::{
             WebhookEvent, WebhookEventType,
             payload::{IssuesWebhookEventAction, PullRequestWebhookEventAction},
         },
     },
-    params,
 };
 use tracing::{info, warn};
 
@@ -30,8 +29,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[derive(Debug, Clone)]
 struct AppState {
     octo: Arc<Octocrab>,
-    webhook_secret: Arc<String>,
-    allowed_users: HashSet<UserId>,
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
@@ -40,19 +37,13 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     let app_id: u64 = std::env::var("GITHUB_APP_ID").unwrap().parse().unwrap();
 
     let private_key_path = std::env::var("APP_PRIVATE_KEY_PATH").unwrap();
-    let webhook_secret = std::env::var("WEBHOOK_SECRET").unwrap();
     let private_key = std::fs::read_to_string(private_key_path).unwrap();
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(private_key.as_bytes()).unwrap();
 
     let octocrab = Arc::new(Octocrab::builder().app(app_id.into(), key).build().unwrap());
 
-    let mut allowed_users = HashSet::new();
-    allowed_users.insert(15859336.into()); // edg-l
-
     let state = AppState {
         octo: octocrab.clone(),
-        webhook_secret: Arc::new(webhook_secret),
-        allowed_users,
     };
 
     // build our application with a single route
@@ -64,9 +55,7 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
     let port = std::env::var("PORT").unwrap_or("3000".to_string());
     let listen = format!("0.0.0.0:{}", port);
     info!("Listening on {}", listen);
-    let listener = tokio::net::TcpListener::bind(listen)
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind(listen).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 
     Ok(())
