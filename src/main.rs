@@ -62,7 +62,9 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     // run our app with hyper, listening globally on port 3000
     let port = std::env::var("PORT").unwrap_or("3000".to_string());
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+    let listen = format!("0.0.0.0:{}", port);
+    info!("Listening on {}", listen);
+    let listener = tokio::net::TcpListener::bind(listen)
         .await
         .unwrap();
     axum::serve(listener, app).await.unwrap();
