@@ -134,6 +134,10 @@ async fn webhook_handler(State(state): State<AppState>, req: Request) -> Respons
                         _ => 0,
                     };
 
+                    if privilege_level == 0 && payload.comment.user.id != payload.issue.user.id {
+                        return StatusCode::OK.into_response();
+                    }
+
                     if let Some(body) = &payload.comment.body {
                         info!("comment: {:?}", body);
                         let repo = event.repository.unwrap();
@@ -164,32 +168,46 @@ async fn webhook_handler(State(state): State<AppState>, req: Request) -> Respons
                                     continue;
                                 }
 
-                                if let Some(_claim) = line.strip_prefix("bug") {
+                                if let Some(cmd_labels) = line.strip_prefix("label") {
+                                    let cmd_labels = cmd_labels.split_ascii_whitespace();
+
+                                    let repo_labels =
+                                        issues.list_labels_for_repo().send().await.unwrap();
+
+                                    let repo_labels: HashSet<String> =
+                                        repo_labels.into_iter().map(|x| x.name).collect();
+
                                     let labels = issues
                                         .list_labels_for_issue(payload.issue.number)
                                         .send()
                                         .await
                                         .unwrap();
-                                    let mut has_label = false;
 
-                                    for page in labels {
-                                        if page.name == "bug" {
-                                            has_label = true;
+                                    let mut current_labels = HashSet::new();
+
+                                    for label in labels {
+                                        current_labels.insert(label.name);
+                                    }
+
+                                    for label in cmd_labels {
+                                        if let Some(add_label) = label.strip_prefix("+") {
+                                            if repo_labels.contains(add_label) {
+                                                current_labels.insert(add_label.to_string());
+                                            }
+                                        } else if let Some(remove_label) = label.strip_prefix("-") {
+                                            if repo_labels.contains(remove_label) {
+                                                current_labels.remove(remove_label);
+                                            }
                                         }
                                     }
 
-                                    if has_label {
-                                        issues
-                                            .remove_label(payload.issue.number, "bug")
-                                            .await
-                                            .unwrap();
-                                    } else {
-                                        issues
-                                            .add_labels(payload.issue.number, &["bug".to_string()])
-                                            .await
-                                            .unwrap();
-                                    }
-                                    continue;
+                                    let current_labels: Vec<_> =
+                                        current_labels.into_iter().collect();
+
+                                    issues
+                                        .replace_all_labels(payload.issue.number, &current_labels)
+                                        .await
+                                        .unwrap();
                                 }
                             }
                         }
