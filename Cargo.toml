@@ -4,5 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+axum = "0.8.1"
+dotenvy = "0.15.7"
+jsonwebtoken = "9.3.1"
 octocrab = "0.43.0"
 tokio = { version = "1.44.0", features = ["macros", "rt-multi-thread"] }
+tower = "0.5.2"
+tower-http = "0.6.2"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
