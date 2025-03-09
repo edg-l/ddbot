@@ -61,7 +61,10 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
         .with_state(state);
 
     // run our app with hyper, listening globally on port 3000
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let port = std::env::var("PORT").unwrap_or("3000".to_string());
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
+        .unwrap();
     axum::serve(listener, app).await.unwrap();
 
     Ok(())
@@ -219,14 +222,38 @@ async fn webhook_handler(State(state): State<AppState>, req: Request) -> Respons
                                 }
 
                                 if let Some(_claim) = line.strip_prefix("ready") {
-                                    issues.add_labels(payload.issue.number, &["waiting-for-reviews".to_string()]).await.unwrap();
-                                    issues.remove_label(payload.issue.number, "waiting-on-author".to_string()).await.unwrap();
+                                    issues
+                                        .add_labels(
+                                            payload.issue.number,
+                                            &["waiting-for-reviews".to_string()],
+                                        )
+                                        .await
+                                        .unwrap();
+                                    issues
+                                        .remove_label(
+                                            payload.issue.number,
+                                            "waiting-on-author".to_string(),
+                                        )
+                                        .await
+                                        .unwrap();
                                     continue;
                                 }
 
                                 if let Some(_claim) = line.strip_prefix("author") {
-                                    issues.add_labels(payload.issue.number, &["waiting-on-author".to_string()]).await.unwrap();
-                                    issues.remove_label(payload.issue.number, "waiting-for-reviews".to_string()).await.unwrap();
+                                    issues
+                                        .add_labels(
+                                            payload.issue.number,
+                                            &["waiting-on-author".to_string()],
+                                        )
+                                        .await
+                                        .unwrap();
+                                    issues
+                                        .remove_label(
+                                            payload.issue.number,
+                                            "waiting-for-reviews".to_string(),
+                                        )
+                                        .await
+                                        .unwrap();
                                     continue;
                                 }
 
