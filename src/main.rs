@@ -1,9 +1,21 @@
-use std::{error::Error, sync::Arc};
+use std::{collections::HashSet, error::Error, sync::Arc};
 
 use axum::{
-    body::{to_bytes, Body, Bytes}, extract::{Request, State}, http::StatusCode, response::{IntoResponse, Response}, routing::{get, post}, Router
+    Router,
+    body::{Body, Bytes, to_bytes},
+    extract::{Request, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::{get, post},
 };
-use octocrab::{models::{self, webhook_events::{WebhookEvent, WebhookEventType}}, params, Octocrab};
+use octocrab::{
+    Octocrab, issues,
+    models::{
+        self, UserId,
+        webhook_events::{WebhookEvent, WebhookEventType, payload::IssuesWebhookEventAction},
+    },
+    params,
+};
 use tracing::{info, warn};
 
 #[tokio::main]
@@ -16,6 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 struct AppState {
     octo: Arc<Octocrab>,
     webhook_secret: Arc<String>,
+    allowed_users: HashSet<UserId>,
 }
 
 pub async fn run() -> Result<(), Box<dyn Error>> {
@@ -30,9 +43,13 @@ pub async fn run() -> Result<(), Box<dyn Error>> {
 
     let octocrab = Arc::new(Octocrab::builder().app(app_id.into(), key).build().unwrap());
 
+    let mut allowed_users = HashSet::new();
+    allowed_users.insert(15859336.into()); // edg-l
+
     let state = AppState {
         octo: octocrab.clone(),
-        webhook_secret: Arc::new(webhook_secret)
+        webhook_secret: Arc::new(webhook_secret),
+        allowed_users,
     };
 
     // build our application with a single route
@@ -56,16 +73,20 @@ async fn webhook_handler(State(state): State<AppState>, req: Request) -> Respons
         .to_str()
         .unwrap();
 
-    let bytes = to_bytes(body, 1024 * 10).await.unwrap();
+    let bytes = to_bytes(body, 1024 * 50).await.unwrap();
 
     let event = WebhookEvent::try_from_header_and_body(header, &bytes).unwrap();
 
     let id = match event.installation {
         Some(x) => match x {
             models::webhook_events::EventInstallation::Full(installation) => installation.id,
-            models::webhook_events::EventInstallation::Minimal(event_installation_id) => event_installation_id.id,
+            models::webhook_events::EventInstallation::Minimal(event_installation_id) => {
+                event_installation_id.id
+            }
         },
-        None => panic!(),
+        None => {
+            return StatusCode::OK.into_response();
+        }
     };
     let client = state.octo.installation(id).unwrap();
 
@@ -73,25 +94,110 @@ async fn webhook_handler(State(state): State<AppState>, req: Request) -> Respons
     match event.kind {
         WebhookEventType::Ping => info!("Received a ping"),
         WebhookEventType::PullRequest => info!("Received a pull request event"),
-        WebhookEventType::Issues => info!("Received a issue request event"),
+        WebhookEventType::Issues => {
+            if let models::webhook_events::WebhookEventPayload::Issues(payload) = event.specific {
+                match payload.action {
+                    IssuesWebhookEventAction::Assigned => {}
+                    IssuesWebhookEventAction::Closed => {}
+                    IssuesWebhookEventAction::Deleted => {}
+                    IssuesWebhookEventAction::Edited => {}
+                    IssuesWebhookEventAction::Labeled => {}
+                    IssuesWebhookEventAction::Opened => {
+                        let repo = event.repository.unwrap();
+                        let issues = client.issues_by_id(repo.id);
+                        issues
+                            .add_labels(payload.issue.number, &["triage-needed".to_string()])
+                            .await
+                            .unwrap();
+                    }
+                    IssuesWebhookEventAction::Reopened => {}
+                    IssuesWebhookEventAction::Unassigned => {}
+                    IssuesWebhookEventAction::Unlabeled => {}
+                    _ => {}
+                }
+            }
+        }
         WebhookEventType::IssueComment => {
             info!("Received a issue comment request event");
             match event.specific {
                 models::webhook_events::WebhookEventPayload::IssueComment(payload) => {
-                    info!("comment: {:?}", payload.comment.body_text);
-                    info!("comment: {:?}", payload.comment.body);
-                    info!("comment: {:?}", payload.comment.body);
-                    let repo = event.repository.as_ref().unwrap();
-                    dbg!(repo.id);
-                    dbg!(&repo.issues_url);
-                    let issues = client.issues_by_id(repo.id);
+                    let privilege_level = match payload.comment.author_association {
+                        models::AuthorAssociation::Collaborator => 1,
+                        models::AuthorAssociation::Contributor => 0,
+                        models::AuthorAssociation::FirstTimer => 0,
+                        models::AuthorAssociation::FirstTimeContributor => 0,
+                        models::AuthorAssociation::Mannequin => 0,
+                        models::AuthorAssociation::Member => 2,
+                        models::AuthorAssociation::None => 0,
+                        models::AuthorAssociation::Owner => 2,
+                        models::AuthorAssociation::Other(_) => 0,
+                        _ => 0,
+                    };
 
-                    issues.update(payload.issue.number).labels(&["bug".to_string()]).send().await.unwrap();
-                    issues.create_comment(payload.issue.number, "hello world").await.unwrap();
-                },
+                    if let Some(body) = &payload.comment.body {
+                        info!("comment: {:?}", body);
+                        let repo = event.repository.unwrap();
+                        let issues = client.issues_by_id(repo.id);
+
+                        for line in body.lines() {
+                            if let Some(line) = line.strip_prefix("!ddnetbot") {
+                                let line = line.trim_start();
+                                if let Some(_claim) = line.strip_prefix("claim") {
+                                    issues
+                                        .add_assignees(
+                                            payload.issue.number,
+                                            &[payload.comment.user.login.as_str()],
+                                        )
+                                        .await
+                                        .unwrap();
+                                    continue;
+                                }
+
+                                if let Some(_claim) = line.strip_prefix("unclaim") {
+                                    issues
+                                        .remove_assignees(
+                                            payload.issue.number,
+                                            &[payload.comment.user.login.as_str()],
+                                        )
+                                        .await
+                                        .unwrap();
+                                    continue;
+                                }
+
+                                if let Some(_claim) = line.strip_prefix("bug") {
+                                    let labels = issues
+                                        .list_labels_for_issue(payload.issue.number)
+                                        .send()
+                                        .await
+                                        .unwrap();
+                                    let mut has_label = false;
+
+                                    for page in labels {
+                                        if page.name == "bug" {
+                                            has_label = true;
+                                        }
+                                    }
+
+                                    if has_label {
+                                        issues
+                                            .remove_label(payload.issue.number, "bug")
+                                            .await
+                                            .unwrap();
+                                    } else {
+                                        issues
+                                            .add_labels(payload.issue.number, &["bug".to_string()])
+                                            .await
+                                            .unwrap();
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => unreachable!(),
             }
-        },
+        }
         // ...
         _ => warn!("Ignored event"),
     };
