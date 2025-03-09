@@ -218,6 +218,18 @@ async fn webhook_handler(State(state): State<AppState>, req: Request) -> Respons
                                     continue;
                                 }
 
+                                if let Some(_claim) = line.strip_prefix("ready") {
+                                    issues.add_labels(payload.issue.number, &["waiting-for-reviews".to_string()]).await.unwrap();
+                                    issues.remove_label(payload.issue.number, "waiting-on-author".to_string()).await.unwrap();
+                                    continue;
+                                }
+
+                                if let Some(_claim) = line.strip_prefix("author") {
+                                    issues.add_labels(payload.issue.number, &["waiting-on-author".to_string()]).await.unwrap();
+                                    issues.remove_label(payload.issue.number, "waiting-for-reviews".to_string()).await.unwrap();
+                                    continue;
+                                }
+
                                 if let Some(cmd_labels) = line.strip_prefix("label") {
                                     let cmd_labels = cmd_labels.split_ascii_whitespace();
 
